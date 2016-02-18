@@ -2,10 +2,10 @@
 const test = require('tape')
 const typeforce = require('typeforce')
 const constants = require('@tradle/constants')
-const genUser = require('../genUser')
+const utils = require('../')
 
 test('genUser', function (t) {
-  genUser({ networkName: 'testnet' }, function (err, user) {
+  utils.genUser({ networkName: 'testnet' }, function (err, user) {
     if (err) throw err
 
     typeforce({
@@ -17,4 +17,10 @@ test('genUser', function (t) {
 
     t.end()
   })
+})
+
+test('json minus bufs', function (t) {
+  const str = utils.toJSONForConsole({ a: new Buffer('abcd', 'hex') })
+  t.equal(str, '{\n  "a": "abcd"\n}')
+  t.end()
 })
