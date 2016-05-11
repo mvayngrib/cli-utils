@@ -23,7 +23,7 @@
   "scripts": {
     "test": "node test"
   },
-  "version": "1.1.0",
+  "version": "1.2.0",
   "dependencies": {
     "@tradle/chained-obj": "^2.0.4",
     "@tradle/constants": "^2.0.1",
