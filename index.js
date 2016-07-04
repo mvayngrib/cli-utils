@@ -1,25 +1,21 @@
 'use strict'
 
-const Q = require('q')
-const constants = require('@tradle/constants')
-const Builder = require('@tradle/chained-obj').Builder
-const genUser = require('./genUser')
-const ROOT_HASH = constants.ROOT_HASH
+const prompt = require('prompt')
+const constants = require('@tradle/engine').constants
+const ALGORITHM = 'aes-256-cbc'
+const SALT_BYTES = 32
+const IV_BYTES = 16
+const KEY_BYTES = 32
+const ITERATIONS = 20000
+const DIGEST = 'sha256'
 const TYPE = constants.TYPE
+const utils = exports
 
-module.exports = {
-  genUser,
-  toJSONForConsole,
-  promptBuildMsg,
-  signNSend,
-  previewSend
-}
-
-function toJSONForConsole (obj) {
+utils.toJSONForConsole = function toJSONForConsole (obj) {
   return JSON.stringify(obj, replacer, 2)
 }
 
-function promptBuildMsg (prompter, models) {
+utils.promptBuildMsg = function promptBuildMsg (prompter, models) {
   return prompter.prompt([
     {
       type: 'input',
@@ -29,7 +25,7 @@ function promptBuildMsg (prompter, models) {
     }
   ])
   .then((result) => {
-    let msg = {
+    const msg = {
       [TYPE]: result.type
     }
 
@@ -38,34 +34,33 @@ function promptBuildMsg (prompter, models) {
   })
 }
 
-function toCoords (recipient) {
-  return [{ [ROOT_HASH]: recipient[ROOT_HASH] }]
-}
+utils.signNSend = function signNSend (prompter, tim, opts) {
+  let object = opts.object
+  if (!tim._promisified) {
+    throw new Error('expected promisified node')
+  }
 
-function signNSend (prompter, tim, opts) {
-  let msg = opts.msg
-  return tim.sign(msg)
-    .then(msg => previewSend(prompter, msg))
-    .then(buildMsg)
-    .then((buf) => {
-      opts.msg = buf
+  return tim.sign({ object })
+    .then(result => previewSend(prompter, result.object))
+    .then(object => {
+      opts.object = object
       return tim.send(opts)
     })
-    .then((entries) => {
+    .then(result => {
       prompter.log('message queued')
-      let rh = entries[0].get(ROOT_HASH)
-      let sentHandler = (info) => {
-        if (info[ROOT_HASH] === rh) {
-          prompter.log(`delivered ${info[TYPE] || 'untyped message'} with hash ${rh}`)
+      const link = result.link
+      tim.on('sent', sentHandler)
+
+      function sentHandler (msg) {
+        if (msg.link === link) {
+          prompter.log(`delivered ${object[TYPE] || 'untyped message'} with link ${link}`)
           tim.removeListener('sent', sentHandler)
         }
       }
-
-      tim.on('sent', sentHandler)
     })
 }
 
-function previewSend (prompter, msg) {
+utils.previewSend = function previewSend (prompter, msg) {
   let json = Buffer.isBuffer(msg)
     ? JSON.parse(msg.toString())
     : msg
@@ -84,6 +79,58 @@ function previewSend (prompter, msg) {
     }
 
     return msg
+  })
+}
+
+utils.encrypt = function encrypt (data, password) {
+  const salt = crypto.randomBytes(SALT_BYTES)
+  const iv = crypto.randomBytes(IV_BYTES)
+  const key = crypto.pbkdf2Sync(password, salt, ITERATIONS, KEY_BYTES, DIGEST)
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv)
+  const ciphertext = Buffer.concat([cipher.update(data), cipher.final()])
+  return Buffer.concat([
+    salt,
+    iv,
+    ciphertext
+  ])
+}
+
+utils.decrypt = function decrypt (data, password) {
+  const salt = data.slice(0, SALT_BYTES)
+  const iv = data.slice(SALT_BYTES, SALT_BYTES + IV_BYTES)
+  const ciphertext = data.slice(SALT_BYTES + IV_BYTES)
+  const key = crypto.pbkdf2Sync(password, salt, ITERATIONS, KEY_BYTES, DIGEST)
+  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv)
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString()
+}
+
+utils.promptPassAndDecrypt = function promptPassAndDecrypt (ciphertext, maxTries, cb) {
+  promptPassAndOp('decrypt', ciphertext, maxTries, cb)
+}
+
+utils.promptPassAndEncrypt = function promptPassAndDecrypt (plaintext, maxTries, cb) {
+  promptPassAndOp('encrypt', plaintext, maxTries, cb)
+}
+
+function promptPassAndOp(op, data, triesLeft, cb) {
+  if (typeof triesLeft === 'function') {
+    cb = triesLeft
+    triesLeft = 1
+  }
+
+  if (!triesLeft) return cb(new Error('incorrect password'))
+
+  prompt.get(['password'], function (err, answer) {
+    if (err) throw err
+
+    let result
+    try {
+      result = utils[op](data, answer.password)
+    } catch (err) {
+      return promptPassAndOp(op, data, --triesLeft, cb)
+    }
+
+    cb(null, result, answer.password)
   })
 }
 
@@ -165,10 +212,4 @@ function replacer (key, val) {
   }
 
   return val
-}
-
-function buildMsg (msg) {
-  return Builder()
-    .data(msg)
-    .build()
 }
