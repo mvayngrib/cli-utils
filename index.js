@@ -140,7 +140,7 @@ function setPropertiesWithModel (prompter, model, msg) {
     return p !== 'from' && p !== 'to' && p !== 'photos' && !(p in msg)
   })
 
-  if (!required.length) return Q(msg)
+  if (!required.length) return Promise.resolve(msg)
 
   const next = required.pop()
   return prompter.prompt([
